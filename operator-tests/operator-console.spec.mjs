@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -20,9 +21,11 @@ async function captureLaunchScreenshot(page, name) {
 
 function startFixtureServer(tempRoot) {
   const python = process.env.PYTHON || (process.platform === "win32" ? "python" : "python3");
+  mkdirSync(path.join(tempRoot, ".codex", "sessions"), { recursive: true });
   const child = spawn(python, [path.join(root, "scripts", "operator_qa_server.py"), tempRoot], {
     cwd: root,
     env: { ...process.env, PYTHONUNBUFFERED: "1" },
+    windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const ready = new Promise((resolve, reject) => {
@@ -208,6 +211,16 @@ test("real operator can inspect, govern, continue, and move a project brain", as
     await expect(page.locator("#base-panel-memory").getByRole("button")).toHaveCount(0);
     await expect(page.getByRole("status").last()).toBeAttached();
     await operatorNavigation.getByRole("button", { name: "Settings", exact: true }).click();
+    await expect(page.getByText("System lifecycle", { exact: true })).toBeVisible();
+    const applyLifecycle = page.getByRole("button", { name: "Apply approved plan", exact: true });
+    await expect(applyLifecycle).toBeDisabled();
+    await page.getByRole("button", { name: "Review lifecycle plan", exact: true }).click();
+    await expect(page.getByRole("region", { name: "Setup lifecycle preview" })).toBeVisible();
+    await expect(applyLifecycle).toBeEnabled();
+    await page.getByLabel("Repository sync").check();
+    await expect(page.getByRole("region", { name: "Setup lifecycle preview" })).toHaveCount(0);
+    await expect(applyLifecycle).toBeDisabled();
+    await page.getByLabel("Repository sync").uncheck();
     await expect(page.getByText("Checkout integrity", { exact: true })).toBeVisible();
     await expect(page.getByText("Verified", { exact: true })).toBeVisible();
     const largeFilePolicy = page.getByLabel("Oversized source handling");
@@ -534,15 +547,30 @@ test("real operator can inspect, govern, continue, and move a project brain", as
     await expect(bootstrappedStartSync).toBeVisible();
     await expect(bootstrappedStartSync).toHaveAttribute("aria-busy", "false");
 
+    const healthHeaders = { "X-Rta-Smriti-Token": fixtureToken };
+    const baselineBootstrap = await fetch(new URL("/api/bootstrap", fixture.url), {
+      headers: healthHeaders,
+    }).then((response) => response.json());
+    const baselineProjects = await fetch(new URL("/api/projects", fixture.url), {
+      headers: healthHeaders,
+    }).then((response) => response.json());
     let healthMode = "conflict";
-    await page.route("**/api/bootstrap", async (route) => {
-      const response = await route.fetch();
-      const payload = await response.json();
+    const projectHealthPayload = (payload) => {
       const projects = healthMode === "empty"
         ? []
         : (payload.projects || []).map((project) => ({ ...project, root_conflict: true }));
-      await route.fulfill({ response, json: { ...payload, projects } });
-    });
+      return { ...payload, projects };
+    };
+    await page.route("**/api/bootstrap", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(projectHealthPayload(baselineBootstrap)),
+    }));
+    await page.route("**/api/projects", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(projectHealthPayload(baselineProjects)),
+    }));
     await page.getByRole("button", { name: "Refresh projects", exact: true }).click();
     await expect(page.getByRole("alert")).toContainText("Canonical-root conflict");
     await page.setViewportSize({ width: 390, height: 844 });
@@ -556,6 +584,7 @@ test("real operator can inspect, govern, continue, and move a project brain", as
     await page.getByRole("button", { name: /Projects Choose a brain/ }).click();
     await expect(page.getByRole("button", { name: "Bootstrap the first project", exact: true })).toBeVisible();
     await page.unroute("**/api/bootstrap");
+    await page.unroute("**/api/projects");
     await page.getByRole("button", { name: "Refresh projects", exact: true }).click();
     await expect(page.getByText("Scanning local brains...", { exact: true })).toBeHidden({ timeout: 30_000 });
     await expect(page.getByText("bootstrapped-project", { exact: true }).first()).toBeVisible();

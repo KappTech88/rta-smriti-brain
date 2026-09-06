@@ -1,3 +1,4 @@
+import hashlib
 import io
 import os
 import stat
@@ -10,10 +11,33 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rta_brain.privacy import find_sensitive_text, redact_sensitive_text
-from scripts.privacy_scan import scan
+from scripts.privacy_scan import load_approved_media_digests, scan
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class PrivacyScanTests(unittest.TestCase):
+    def test_approved_svg_checkout_encodings_are_explicit(self):
+        data = (ROOT / "launch-site" / "favicon.svg").read_bytes()
+        lf = data.replace(b"\r\n", b"\n")
+        crlf = lf.replace(b"\n", b"\r\n")
+        approved = load_approved_media_digests(
+            ROOT / "constraints" / "release-media.sha256"
+        )
+
+        self.assertEqual(
+            {
+                hashlib.sha256(lf).hexdigest(),
+                hashlib.sha256(crlf).hexdigest(),
+            }
+            & approved,
+            {
+                hashlib.sha256(lf).hexdigest(),
+                hashlib.sha256(crlf).hexdigest(),
+            },
+        )
+
     def test_missing_file_and_empty_release_roots_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             parent = Path(tmp)
@@ -217,6 +241,53 @@ class PrivacyScanTests(unittest.TestCase):
                 ("rta_fixture-1.0-py3-none-any.whl!rta_fixture/config.py", "windows-user-path"),
                 scan(root, []),
             )
+
+    def test_renamed_visual_media_still_requires_digest_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload = b"\x89PNG\r\n\x1a\n" + b"unapproved-pixel-fixture"
+            (root / "preview.bin").write_bytes(payload)
+
+            findings = scan(
+                root,
+                [],
+                require_approved_media=True,
+                approved_media_digests=set(),
+            )
+
+            self.assertIn(("preview.bin", "unapproved-visual-media"), findings)
+            approved = scan(
+                root,
+                [],
+                require_approved_media=True,
+                approved_media_digests={hashlib.sha256(payload).hexdigest()},
+            )
+            self.assertNotIn(("preview.bin", "unapproved-visual-media"), approved)
+
+    def test_archived_visual_media_requires_digest_approval(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            wheel = root / "rta_fixture-1.0-py3-none-any.whl"
+            payload = b"\x89PNG\r\n\x1a\n" + b"archived-pixel-fixture"
+            with zipfile.ZipFile(wheel, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("rta_fixture/static/preview.png", payload)
+
+            findings = scan(
+                root,
+                [],
+                require_approved_media=True,
+                approved_media_digests=set(),
+            )
+
+            member = "rta_fixture-1.0-py3-none-any.whl!rta_fixture/static/preview.png"
+            self.assertIn((member, "unapproved-visual-media"), findings)
+            approved = scan(
+                root,
+                [],
+                require_approved_media=True,
+                approved_media_digests={hashlib.sha256(payload).hexdigest()},
+            )
+            self.assertNotIn((member, "unapproved-visual-media"), approved)
 
     def test_unc_detector_rejects_binary_noise_with_invalid_share_component(self):
         with tempfile.TemporaryDirectory() as tmp:
