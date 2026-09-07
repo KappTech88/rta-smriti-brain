@@ -2,6 +2,50 @@
 
 **A sovereign, local project-memory and evidence layer for AI coding agents.**
 
+## About this fork
+
+This is [kapptech88](https://github.com/kapptech88)'s fork of
+[sulabhdubey/rta-smriti-brain](https://github.com/sulabhdubey/rta-smriti-brain), kept so that
+[Kapp's Dev Planner Bundle](https://github.com/kapptech88/kapp-dev-planner-bundle) has a pinned,
+tested memory backend. Upstream does the hard part: a sovereign SQLite "brain" per project that
+stores repository structure, decisions, checkpoints, and evidence with provenance labels
+(`pratyaksha` observed, `sabda` stated, `anumana` inferred), plus a stdio MCP server so any agent
+can read that memory without re-telling the project's story every session.
+
+What this fork is for:
+
+- **Planning workflow backend.** The Dev Planner Bundle runs a project through drill-me → PRD →
+  tasks → plan. Every user answer, stack decision, and milestone becomes a `remember` entry, and
+  each step ends with a `checkpoint` that the next session picks up through `continue-prompt`.
+- **Three hosts, one install.** Verified on Claude Code and Grok Build, wired for Cursor: a
+  `python3 -m venv` install under `~/.local/share/rta-smriti`, CLI wrappers in `~/.local/bin`, and
+  a read-only MCP gateway (`rta-brain-mcp --brain-dir …`) over all project brains. Writes go
+  through the CLI so they stay explicit and visible.
+- **Python 3.14 tested.** Upstream lists 3.11 to 3.13; this fork records that 3.14.7 works on Linux
+  with the current dependency set and keeps the install script honest about it.
+- **Machine-aware planning.** The bundle's `/drill-me` step can inventory the machine, assess how
+  the installed toolchain fits the build, recommend a better stack, and store the observed
+  versions in the brain as direct evidence.
+
+Nothing here changes upstream's privacy posture: local SQLite, no telemetry, no cloud database,
+one brain per project. Bug fixes that are not specific to the bundle are sent upstream.
+
+Quick start with the bundle:
+
+```bash
+git clone https://github.com/kapptech88/kapp-dev-planner-bundle ~/Projects/kapp-dev-planner-bundle
+cd ~/Projects/kapp-dev-planner-bundle
+./install.sh --brain        # clones this fork into ~/.local/share/rta-smriti/src and installs it
+./install.sh --host all     # Claude Code, Grok Build, Cursor
+```
+
+Then open a repo in a terminal-hosted agent and run `/drill-me`.
+
+Credit: Rta-Smriti was conceived and researched by Sulabh Dubey and built with OpenAI Codex.
+MIT licensed, as is this fork.
+
+---
+
 Rta-Smriti gives every project a durable memory: repository structure, agent sessions,
 decisions, evidence, and the exact state needed to continue work without retelling the story.
 
